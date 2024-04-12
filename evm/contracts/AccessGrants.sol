@@ -4,8 +4,13 @@ pragma solidity =0.8.19;
 import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-contract AccessGrants {
+
+
+contract AccessGrants  is ERC721, ERC721URIStorage, Ownable {
     using EnumerableSet for EnumerableSet.Bytes32Set;
 
     struct Grant {
@@ -15,16 +20,32 @@ contract AccessGrants {
         uint256 lockedUntil;
     }
 
+     struct Validators {
+        EnumerableSet.AddressSet addresses;
+    }
+
+    string private _name;
+    string private _symbol;
+
     mapping(bytes32 => Grant) private _grantsById;
 
     mapping(address => EnumerableSet.Bytes32Set) private _grantIdsByOwner;
     mapping(address => EnumerableSet.Bytes32Set) private _grantIdsByGrantee;
     mapping(string => EnumerableSet.Bytes32Set) private _grantIdsByDataId;
+    mapping(address => bool) private _addressApproved;
+    Validators private _validators;
+
+
 
     bytes32 private constant _WILDCARD_DATA_ID = keccak256(abi.encodePacked("0"));
 
-    constructor() {}
+    constructor(address initialOwner)
+        ERC721("KYCBridge", "KYB")
+        Ownable()
+    {
+        transferOwnership(initialOwner);
 
+    }
     event GrantAdded(
         address indexed owner,
         address indexed grantee,
@@ -38,6 +59,27 @@ contract AccessGrants {
         string  indexed dataId,
         uint256         lockedUntil
     );
+
+    event GrantAccepted(
+        address indexed owner
+    );
+
+    event TokenTransfered(
+        address indexed fromAddress,
+        address indexed toAddress
+
+    );
+
+    function _isApproved(address addr) internal view returns (bool) {
+        return _addressApproved[addr];
+    }
+    function insertAddressApproved(address addr) external  {
+    require(_isValidValidator(msg.sender),"Not valid");
+    _addressApproved[addr] = true;
+     emit GrantAccepted(addr);
+}
+
+    
 
     function insertGrantBySignatureMessage(
         address owner,
@@ -59,6 +101,7 @@ contract AccessGrants {
         string calldata dataId,
         uint256 lockedUntil
     ) external {
+        require(_isApproved(msg.sender), "Sender is not Approved");
          _insertGrant(msg.sender, grantee, dataId, lockedUntil);
     }
 
@@ -84,6 +127,8 @@ contract AccessGrants {
             ),
             "Signature doesn't match"
         );
+        require(_isApproved(grantee), "Grantee is not Approved");
+
         _insertGrant(owner, grantee, dataId, lockedUntil);
     }
 
@@ -93,6 +138,7 @@ contract AccessGrants {
         string calldata dataId,
         uint256 lockedUntil
     ) public pure returns (string memory) {
+
         return string.concat(
             "operation: deleteGrant", "\n",
             "owner: ", Strings.toHexString(owner), "\n",
@@ -109,6 +155,8 @@ contract AccessGrants {
         uint256 lockedUntil,
         bytes calldata signature
     ) external {
+        require(_isApproved(msg.sender), "Grantee is not Approved");
+
         require(
             SignatureChecker.isValidSignatureNow(
                 owner,
@@ -132,6 +180,8 @@ contract AccessGrants {
         string memory dataId,
         uint256 lockedUntil
     ) external {
+        require(_isApproved(msg.sender), "Grantee is not Approved");
+
          _deleteGrant(msg.sender, grantee, dataId, lockedUntil);
     }
 
@@ -139,6 +189,8 @@ contract AccessGrants {
         address grantee,
         string memory dataId
     ) external view returns (Grant[] memory) {
+        require(_isApproved(grantee), "Grantee is not Approved");
+
         return findGrants(address(0), grantee, dataId);
     }
 
@@ -147,6 +199,8 @@ contract AccessGrants {
         address grantee,
         string memory dataId
     ) public view returns (Grant[] memory) {
+        require(_isApproved(owner), "Grantee is not Approved");
+
         bytes32[] memory candidateGrantIds;
         uint256 candidateGrantCount;
 
@@ -271,4 +325,59 @@ contract AccessGrants {
     ) private pure returns (bool) {
         return keccak256(abi.encodePacked((dataId))) == _WILDCARD_DATA_ID;
     }
+
+     function safeMint(address to, uint256 tokenId, string memory uri)
+        public
+        onlyOwner
+    {
+        _safeMint(to, tokenId);
+        _setTokenURI(tokenId, uri);
+    }
+
+    // The following functions are overrides required by Solidity.
+
+    function tokenURI(uint256 tokenId)
+        public
+        view
+        override(ERC721, ERC721URIStorage)
+        returns (string memory)
+    {
+        return super.tokenURI(tokenId);
+    }
+    function _burn(uint256 tokenId) internal override(ERC721, ERC721URIStorage) {
+    // Call ERC721URIStorage implementation of _burn
+    ERC721URIStorage._burn(tokenId);
+}
+function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        override(ERC721, ERC721URIStorage)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
+    }
+
+    function addValidator(address validator) external onlyOwner {
+        require(!EnumerableSet.contains(_validators.addresses, validator), "Validator already exists");
+        EnumerableSet.add(_validators.addresses, validator);    }
+
+    // Function to remove a validator
+    function removeValidator(address validator) external onlyOwner {
+        require(!EnumerableSet.contains(_validators.addresses, validator), "Validator already exists");
+        EnumerableSet.remove(_validators.addresses, validator);
+    }
+
+    // Function to check if an address is a valid validator
+    function _isValidValidator(address addr) internal view returns (bool) {
+        return EnumerableSet.contains(_validators.addresses, addr);
+    }
+
+    function _transfer(address from, address to, uint256 tokenId) internal override(ERC721) {
+    ERC721._transfer(from, to, tokenId);
+    emit TokenTransfered(from, to);
+}
+
+
+   
+
 }

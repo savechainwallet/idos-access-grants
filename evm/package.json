@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "test": "hardhat test"
+    "test": "hardhat test",
+    "node" : "hardhat node"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.2",
